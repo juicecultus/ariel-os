@@ -48,5 +48,6 @@ cfg_if::cfg_if! {
     #[cfg(context = "st-nucleo-wb55")] { include!("st-nucleo-wb55.rs"); } else if
     #[cfg(context = "st-nucleo-wba55")] { include!("st-nucleo-wba55.rs"); } else if
     #[cfg(context = "st-steval-mkboxpro")] { include!("st-steval-mkboxpro.rs"); } else if
-    #[cfg(context = "stm32u083c-dk")] { include!("stm32u083c-dk.rs"); } else {}
+    #[cfg(context = "stm32u083c-dk")] { include!("stm32u083c-dk.rs"); } else if
+    #[cfg(context = "xteink-x4")] { include!("xteink-x4.rs"); } else {}
 }

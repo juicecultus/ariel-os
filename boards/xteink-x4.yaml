@@ -1,0 +1,14 @@
+boards:
+  xteink-x4:
+    chip: esp32-c3-mini-1
+    leds:
+      led0:
+        pin: GPIO2
+        color: rgb
+    buttons:
+      button0:
+        pin: GPIO3
+        active: low
+    ariel:
+      flags:
+        - has_hwrng

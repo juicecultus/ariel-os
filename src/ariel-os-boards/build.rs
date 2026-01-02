@@ -65,4 +65,5 @@ pub fn main() {
     println!("cargo::rustc-check-cfg=cfg(context, values(\"st-nucleo-wba55\"))");
     println!("cargo::rustc-check-cfg=cfg(context, values(\"st-steval-mkboxpro\"))");
     println!("cargo::rustc-check-cfg=cfg(context, values(\"stm32u083c-dk\"))");
+    println!("cargo::rustc-check-cfg=cfg(context, values(\"xteink-x4\"))");
 }

@@ -263,3 +263,9 @@ builders:
   env:
     CARGO_ENV:
     - CONFIG_SWI=USART4_LPUART3
+- name: xteink-x4
+  parent: esp32-c3-mini-1
+  provides:
+  - has_buttons
+  - has_hwrng
+  - has_leds
