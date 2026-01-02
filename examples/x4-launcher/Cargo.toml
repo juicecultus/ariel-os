@@ -1,0 +1,29 @@
+[package]
+name = "x4-launcher"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ariel-os = { path = "../../src/ariel-os", features = ["alloc", "spi", "time"] }
+ariel-os-boards = { path = "../../src/ariel-os-boards" }
+
+embassy-sync = { workspace = true }
+embassy-futures = { workspace = true }
+embedded-hal = { workspace = true }
+embedded-hal-async = { workspace = true }
+once_cell = { workspace = true }
+static_cell = { workspace = true }
+
+embedded-graphics = "0.8.1"
+heapless = { workspace = true }
+
+embedded-sdmmc = "0.9.0"
+miniz_oxide = "0.8.9"
+xml-no-std = "0.8.26"
+
+esp-hal = { workspace = true }
+nb = "1.1.0"
+
+[lints]
+workspace = true

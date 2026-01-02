@@ -1,0 +1,4 @@
+apps:
+  - name: x4-launcher
+    context:
+      - xteink-x4

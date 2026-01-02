@@ -37,3 +37,4 @@ subdirs:
   - udp-echo
   - usb-keyboard
   - usb-serial
+  - x4-launcher
