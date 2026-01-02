@@ -1,0 +1,17 @@
+[package]
+name = "eink-hello"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ariel-os = { path = "../../src/ariel-os", features = ["spi", "time"] }
+ariel-os-boards = { path = "../../src/ariel-os-boards" }
+embassy-sync = { workspace = true }
+embedded-hal-async = { workspace = true }
+once_cell = { workspace = true }
+static_cell = { workspace = true }
+embedded-graphics = "0.8.1"
+
+[lints]
+workspace = true
