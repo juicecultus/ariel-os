@@ -114,7 +114,6 @@ uart = ["dep:embedded-io-async", "ariel-os-embassy-common/uart"]
 
 ## Enables threading support.
 threading = [
-  "esp-radio?/preempt-extern",
   "dep:ariel-os-threads",
   "dep:esp-wifi-sys",
 ]
