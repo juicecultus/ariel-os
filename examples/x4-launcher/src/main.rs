@@ -133,6 +133,7 @@ enum Screen {
     Settings,
     SettingsReader,
     SettingsWifi,
+    WifiScan,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -465,6 +466,8 @@ struct AppState {
     settings_selected: usize,
     settings_reader_selected: usize,
     settings_wifi_selected: usize,
+    wifi_scan_selected: usize,
+    wifi_scanning: bool,
     settings: UiSettings,
     sd_present: bool,
     battery_pct: u8,
@@ -698,8 +701,44 @@ async fn render_state<D>(
             let _ = line4.push_str("RSSI: ");
             let _ = core::fmt::write(&mut line4, format_args!("{} dBm", state.wifi_rssi));
 
-            let items = [line0.as_str(), "Edit Password", line1.as_str(), line2.as_str(), line3.as_str(), line4.as_str(), "Reconnect"];
+            let items = [line0.as_str(), "Edit Password", line1.as_str(), line2.as_str(), line3.as_str(), line4.as_str(), "Scan for Networks", "Reconnect"];
             ui::draw_list_6(&mut canvas, &l, &items[..], state.settings_wifi_selected);
+        }
+        Screen::WifiScan => {
+            let status = ui::UiStatus {
+                title: "Wi-Fi Scan",
+                battery_pct: Some(state.battery_pct),
+                sd_present: state.sd_present,
+                wifi_on: state.wifi_connected,
+                bt_on: false,
+            };
+            ui::draw_chrome(&mut canvas, &l, status, nav);
+
+            if state.wifi_scanning {
+                let items = ["Scanning..."];
+                ui::draw_list_6(&mut canvas, &l, &items[..], 0);
+            } else {
+                let mut labels: [String<64>; 16] = Default::default();
+                let mut labels_ref: [&str; 16] = [""; 16];
+                let mut count = 0;
+                
+                if let Ok(res) = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.try_lock() {
+                    count = res.len().min(16);
+                    for i in 0..count {
+                        let _ = core::fmt::write(&mut labels[i], format_args!("{} ({} dBm)", res[i].ssid, res[i].rssi));
+                    }
+                }
+
+                if count == 0 {
+                    let items = ["No networks found", "Press OK to scan"];
+                    ui::draw_list_6(&mut canvas, &l, &items[..], state.wifi_scan_selected);
+                } else {
+                    for i in 0..count {
+                        labels_ref[i] = labels[i].as_str();
+                    }
+                    ui::draw_list_6(&mut canvas, &l, &labels_ref[..count], state.wifi_scan_selected);
+                }
+            }
         }
         Screen::SettingsReader => {
             let status = ui::UiStatus {
@@ -825,6 +864,8 @@ async fn main(peripherals: pins::Peripherals) {
         settings_selected: 0,
         settings_reader_selected: 0,
         settings_wifi_selected: 0,
+        wifi_scan_selected: 0,
+        wifi_scanning: false,
         settings: UiSettings {
             rotation: ui::Rotation::Portrait,
             books_view_mode: ui::ViewMode::List,
@@ -887,6 +928,13 @@ async fn main(peripherals: pins::Peripherals) {
             let mac = esp_wifi::wifi::get_mac(esp_wifi::wifi::WifiStaDevice);
             if mac != state.wifi_mac {
                 state.wifi_mac = mac;
+                dirty = true;
+            }
+
+            // Update scanning status
+            if state.wifi_scanning && !ariel_os::hal::wifi::esp_wifi::SCAN_REQUESTED.load(core::sync::atomic::Ordering::SeqCst) {
+                // Scan should be done (or at least request cleared)
+                state.wifi_scanning = false;
                 dirty = true;
             }
         }
@@ -1087,7 +1135,7 @@ async fn main(peripherals: pins::Peripherals) {
                         &mut state.settings_wifi_selected,
                         ev,
                         ui::ViewMode::List,
-                        7,
+                        8,
                     );
                     if state.settings_wifi_selected != old {
                         dirty = true;
@@ -1121,11 +1169,60 @@ async fn main(peripherals: pins::Peripherals) {
                                 dirty = true;
                             }
                             6 => {
+                                state.screen = Screen::WifiScan;
+                                state.wifi_scan_selected = 0;
+                                dirty = true;
+                            }
+                            7 => {
                                 #[cfg(feature = "wifi-esp")]
                                 ariel_os::hal::wifi::esp_wifi::reconnect();
                                 info!("Reconnection triggered");
                             }
                             _ => {}
+                        }
+                    }
+                }
+                Screen::WifiScan => {
+                    let mut count = 0;
+                    if let Ok(res) = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.try_lock() {
+                        count = res.len();
+                    }
+                    if count == 0 { count = 2; } // "No networks found" + "Press OK to scan"
+
+                    let old = state.wifi_scan_selected;
+                    nav_move(
+                        &mut state.wifi_scan_selected,
+                        ev,
+                        ui::ViewMode::List,
+                        count,
+                    );
+                    if state.wifi_scan_selected != old {
+                        dirty = true;
+                    }
+
+                    if ev == ButtonEvent::Back {
+                        state.screen = Screen::SettingsWifi;
+                        dirty = true;
+                    }
+
+                    if ev == ButtonEvent::Confirm {
+                        if let Ok(res) = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.try_lock() {
+                            if state.wifi_scan_selected < res.len() {
+                                state.wifi_ssid = res[state.wifi_scan_selected].ssid.clone();
+                                ariel_os::hal::wifi::set_credentials(state.wifi_ssid.as_str(), state.wifi_password.as_str());
+                                state.screen = Screen::SettingsWifi;
+                                dirty = true;
+                            } else {
+                                // Trigger scan
+                                ariel_os::hal::wifi::esp_wifi::request_scan();
+                                state.wifi_scanning = true;
+                                dirty = true;
+                            }
+                        } else {
+                            // Trigger scan
+                            ariel_os::hal::wifi::esp_wifi::request_scan();
+                            state.wifi_scanning = true;
+                            dirty = true;
                         }
                     }
                 }
