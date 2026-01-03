@@ -8,7 +8,7 @@ publish = false
 ariel-os = { path = "../../src/ariel-os", features = ["storage"] }
 ariel-os-boards = { path = "../../src/ariel-os-boards" }
 arrayvec = { version = "0.7.4", default-features = false, features = ["serde"] }
-heapless = { workspace = true, features = ["defmt-03", "serde"] }
+heapless = { workspace = true, features = ["defmt", "serde"] }
 serde = { workspace = true, default-features = false, features = ["derive"] }
 
 [lints]
