@@ -17,7 +17,6 @@ embassy-executor = { workspace = true, default-features = false, features = [
   "arch-cortex-m",
 ] }
 embassy-nrf = { workspace = true, default-features = false, features = [
-  "optfield",
   "time-driver-rtc1",
   "time",
   "unstable-pac",

@@ -19,7 +19,6 @@ embassy-executor = { workspace = true, default-features = false, features = [
 ] }
 embassy-stm32 = { workspace = true, default-features = false, features = [
   "memory-x",
-  "optfield",
   "rt",
   "time-driver-any",
   "unstable-pac",

@@ -20,8 +20,8 @@ opt-level = 3
 
 # branch = "embassy-embedded-hal-v0.3.0+ariel-os",
 embassy-embedded-hal = { git = "https://github.com/ariel-os/embassy", rev = "21147bdceb85f55e375973f30e47c17036063689" }
-# branch = "embassy-executor-v0.7.0+04.04.25+ariel-os",
-embassy-executor = { git = "https://github.com/ariel-os/embassy", rev = "b552a87578479a92b3027bd208c712445499589c" }
+# branch = "embassy-executor-v0.7.0+ariel-os",
+embassy-executor = { git = "https://github.com/ariel-os/embassy", rev = "a3c1bb2878df6b977f086356688033fe585683e4" }
 # branch = "embassy-executor-macros-v0.6.2+04.04.25"
 embassy-executor-macros = { git = "https://github.com/ariel-os/embassy", rev = "1b08496e441cfd2b2e9660fe0cc589c3bc5f0824" }
 # branch = "embassy-hal-internal-v0.2.0+ariel-os"
@@ -30,20 +30,20 @@ embassy-hal-internal = { git = "https://github.com/ariel-os/embassy", rev = "ed7
 embassy-nrf = { git = "https://github.com/ariel-os/embassy", rev = "3940a79a29ae578a35625cae949bea473abf21d1" }
 # branch = "embassy-net-v0.6.0+ariel-os"
 embassy-net = { git = "https://github.com/ariel-os/embassy", rev = "3d9f77ee05cdb18f1cd676233bcda9b6f7be3369" }
-# branch = "embassy-rp-v0.4.0+ariel-os+trng-panic-fix"
-embassy-rp = { git = "https://github.com/ariel-os/embassy", rev = "1dd58227a73efa8da2aef96aaccf17b8749b9f7b" }
+# branch = "embassy-rp-v0.4.0+ariel-os"
+embassy-rp = { git = "https://github.com/ariel-os/embassy", rev = "dab783fcee77ed024728de37a2ea4cb26de7d01c" }
 # branch = "embassy-stm32-v0.2.0+ariel-os"
 embassy-stm32 = { git = "https://github.com/ariel-os/embassy", rev = "90c8da09646d5fd97b7d416720688dcd3da1ecfb" }
 # branch = "embassy-time-v0.5.0+ariel-os"
 embassy-time = { git = "https://github.com/ariel-os/embassy", rev = "32919cd38e4a5ad5fc21dfb339abd45a74bd1dc9" }
 
-# ariel-os esp-hal fork, using branch = "esp-hal-v1.0.0+ariel-os"
-esp-alloc = { git = "https://github.com/ariel-os/esp-hal", rev = "643ac64a2edec6337b2b1ea00f7002726fa3f9c7" }
-esp-hal = { git = "https://github.com/ariel-os/esp-hal", rev = "643ac64a2edec6337b2b1ea00f7002726fa3f9c7" }
-esp-hal-embassy = { git = "https://github.com/ariel-os/esp-hal", rev = "643ac64a2edec6337b2b1ea00f7002726fa3f9c7" }
-esp-println = { git = "https://github.com/ariel-os/esp-hal", rev = "643ac64a2edec6337b2b1ea00f7002726fa3f9c7" }
-esp-radio = { git = "https://github.com/ariel-os/esp-hal", rev = "643ac64a2edec6337b2b1ea00f7002726fa3f9c7" }
-xtensa-lx-rt = { git = "https://github.com/ariel-os/esp-hal", rev = "643ac64a2edec6337b2b1ea00f7002726fa3f9c7" }
+# ariel-os esp-hal fork, using branch = "esp-hal-v1.0.0+20251203+ariel-os"
+esp-alloc = { git = "https://github.com/ariel-os/esp-hal", rev = "7a8436fe3ce6e6b8194a5c2d4259638b699fb331" }
+esp-hal = { git = "https://github.com/ariel-os/esp-hal", rev = "7a8436fe3ce6e6b8194a5c2d4259638b699fb331" }
+esp-println = { git = "https://github.com/ariel-os/esp-hal", rev = "7a8436fe3ce6e6b8194a5c2d4259638b699fb331" }
+esp-radio = { git = "https://github.com/ariel-os/esp-hal", rev = "7a8436fe3ce6e6b8194a5c2d4259638b699fb331" }
+esp-storage = { git = "https://github.com/ariel-os/esp-hal", rev = "7a8436fe3ce6e6b8194a5c2d4259638b699fb331" }
+xtensa-lx-rt = { git = "https://github.com/ariel-os/esp-hal", rev = "7a8436fe3ce6e6b8194a5c2d4259638b699fb331" }
 
 # branch = "v0.6.2+ariel-os"
 embedded-test = { git = "https://github.com/ariel-os/embedded-test", rev = "20642538eb4e6fa44b5f37723b07946c74b5c757" }

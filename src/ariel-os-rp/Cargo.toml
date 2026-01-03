@@ -15,7 +15,6 @@ defmt = { workspace = true, optional = true }
 embassy-embedded-hal = { workspace = true, optional = true }
 embassy-net-driver-channel = { workspace = true, optional = true }
 embassy-rp = { workspace = true, default-features = false, features = [
-  "optfield",
   "rt",
   "time-driver",
   "unstable-pac",
