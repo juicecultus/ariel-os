@@ -122,7 +122,36 @@ impl OutputPin for RawGpio12 {
     }
 }
 
-// Removed Ariel OS SPI_BUS - using esp-hal SPI directly
+#[cfg(context = "xteink-x4")]
+#[allow(unsafe_code)]
+fn scan_sd_card(books: &mut Vec<String<64>, 48>) -> bool {
+    let spi2 = unsafe { esp_hal::peripherals::SPI2::steal() };
+    let sck = unsafe { esp_hal::gpio::GpioPin::<8>::steal() };
+    let miso = unsafe { esp_hal::gpio::GpioPin::<7>::steal() };
+    let mosi = unsafe { esp_hal::gpio::GpioPin::<10>::steal() };
+    
+    let spi_bus = Spi::new(
+        spi2,
+        SpiConfig::default()
+            .with_frequency(20_000_000u32.Hz())
+            .with_mode(SpiMode::_0),
+    )
+    .unwrap()
+    .with_sck(sck)
+    .with_miso(miso)
+    .with_mosi(mosi);
+    
+    let spi_bus_ref = RefCell::new(spi_bus);
+    let delay = EspDelay::new();
+    
+    let sd_cs = RawGpio12::new();
+    let sd_spi = RefCellDevice::new(&spi_bus_ref, sd_cs, delay.clone()).expect("SD SPI failed");
+    
+    let sd_card = SdCard::new(sd_spi, delay.clone());
+    let mut volume_manager = VolumeManager::new(sd_card, SdTimeSource);
+    
+    scan_books_from_sd(&mut volume_manager, books)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
@@ -720,11 +749,10 @@ async fn render_state<D>(
             } else {
                 static mut LABELS: [String<64>; 16] = [const { String::new() }; 16];
                 let mut labels_ref: [&str; 16] = [""; 16];
-                let mut count = 0;
                 
                 // Use lock().await to ensure we get results even if the task just finished
                 let res_guard = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.lock().await;
-                count = res_guard.len().min(16);
+                let count = res_guard.len().min(16);
                 #[allow(unsafe_code)]
                 unsafe {
                     for i in 0..count {
@@ -936,7 +964,9 @@ async fn main(peripherals: pins::Peripherals) {
 
             // Update scanning status
             let running = ariel_os::hal::wifi::esp_wifi::SCAN_RUNNING.load(core::sync::atomic::Ordering::SeqCst);
-            if state.wifi_scanning && !running {
+            let requested = ariel_os::hal::wifi::esp_wifi::SCAN_REQUESTED.load(core::sync::atomic::Ordering::SeqCst);
+            
+            if state.wifi_scanning && !running && !requested {
                 state.wifi_scanning = false;
                 dirty = true;
             }
@@ -986,10 +1016,16 @@ async fn main(peripherals: pins::Peripherals) {
 
                     if ev == ButtonEvent::Confirm {
                         // Enter Library: mount + list books once.
-                        // TODO: Re-enable once async SD + FAT adapter is complete
-                        // let ok = scan_books_from_sd(&mut volume_manager, &mut state.books);
-                        // state.sd_present = ok;
-                        state.sd_present = false; // SD not yet working with async
+                        #[cfg(context = "xteink-x4")]
+                        {
+                            let ok = scan_sd_card(&mut state.books);
+                            state.sd_present = ok;
+                        }
+                        #[cfg(not(context = "xteink-x4"))]
+                        {
+                            state.sd_present = false;
+                        }
+                        
                         state.library_cursor = 0;
                         state.screen = Screen::Library;
                         dirty = true;
