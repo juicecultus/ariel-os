@@ -290,3 +290,10 @@ pub fn default_spi_config() -> ariel_os::hal::spi::main::Config {
     spi_config.mode = ariel_os::spi::Mode::Mode0;
     spi_config
 }
+
+pub fn sd_spi_config() -> ariel_os::hal::spi::main::Config {
+    let mut spi_config = ariel_os::hal::spi::main::Config::default();
+    spi_config.frequency = const { highest_freq_in(Kilohertz::kHz(125)..=Kilohertz::kHz(500)) };
+    spi_config.mode = ariel_os::spi::Mode::Mode0;
+    spi_config
+}

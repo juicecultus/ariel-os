@@ -6565,6 +6565,7 @@ version = "0.0.0"
 dependencies = [
  "ariel-os",
  "ariel-os-boards",
+ "embassy-embedded-hal",
  "embassy-futures",
  "embassy-sync 0.6.2",
  "embedded-graphics 0.8.1",

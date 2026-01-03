@@ -10,6 +10,7 @@ ariel-os-boards = { path = "../../src/ariel-os-boards" }
 
 embassy-sync = { workspace = true }
 embassy-futures = { workspace = true }
+embassy-embedded-hal = { workspace = true }
 embedded-hal = { workspace = true }
 embedded-hal-async = { workspace = true }
 once_cell = { workspace = true }
