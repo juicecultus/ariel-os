@@ -130,17 +130,19 @@ enum Screen {
     Tools,
     Settings,
     SettingsReader,
+    SettingsWifi,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SettingsItem {
     Reader,
+    Wifi,
     Rotation,
 }
 
 impl SettingsItem {
-    fn all() -> [SettingsItem; 2] {
-        [SettingsItem::Reader, SettingsItem::Rotation]
+    fn all() -> [SettingsItem; 3] {
+        [SettingsItem::Reader, SettingsItem::Wifi, SettingsItem::Rotation]
     }
 }
 
@@ -460,10 +462,12 @@ struct AppState {
     tools_selected: usize,
     settings_selected: usize,
     settings_reader_selected: usize,
+    settings_wifi_selected: usize,
     settings: UiSettings,
     sd_present: bool,
     battery_pct: u8,
     wifi_connected: bool,
+    ip_address: [u8; 4],
     books: Vec<String<64>, 48>,
 }
 
@@ -647,8 +651,39 @@ async fn render_state<D>(
                 ui::Rotation::Landscape => "Landscape",
             });
 
-            let items = ["Reader", line1.as_str()];
+            let items = ["Reader", "Wi-Fi", line1.as_str()];
             ui::draw_list_6(&mut canvas, &l, &items[..], state.settings_selected);
+        }
+        Screen::SettingsWifi => {
+            let status = ui::UiStatus {
+                title: "Wi-Fi",
+                battery_pct: Some(state.battery_pct),
+                sd_present: state.sd_present,
+                wifi_on: state.wifi_connected,
+                bt_on: false,
+            };
+            ui::draw_chrome(&mut canvas, &l, status, nav);
+
+            let mut line0: String<64> = String::new();
+            let _ = line0.push_str("SSID: ");
+            #[cfg(feature = "wifi-esp")]
+            let _ = line0.push_str(ariel_os::hal::wifi::WIFI_NETWORK);
+
+            let mut line1: String<64> = String::new();
+            let _ = line1.push_str("Status: ");
+            let _ = line1.push_str(if state.wifi_connected { "Connected" } else { "Disconnected" });
+
+            let mut line2: String<64> = String::new();
+            let _ = line2.push_str("IP: ");
+            if state.wifi_connected {
+                let _ = core::fmt::write(&mut line2, format_args!("{}.{}.{}.{}", 
+                    state.ip_address[0], state.ip_address[1], state.ip_address[2], state.ip_address[3]));
+            } else {
+                let _ = line2.push_str("0.0.0.0");
+            }
+
+            let items = [line0.as_str(), line1.as_str(), line2.as_str()];
+            ui::draw_list_6(&mut canvas, &l, &items[..], state.settings_wifi_selected);
         }
         Screen::SettingsReader => {
             let status = ui::UiStatus {
@@ -773,6 +808,7 @@ async fn main(peripherals: pins::Peripherals) {
         tools_selected: 0,
         settings_selected: 0,
         settings_reader_selected: 0,
+        settings_wifi_selected: 0,
         settings: UiSettings {
             rotation: ui::Rotation::Portrait,
             books_view_mode: ui::ViewMode::List,
@@ -780,6 +816,7 @@ async fn main(peripherals: pins::Peripherals) {
         sd_present: false,
         battery_pct: 100,
         wifi_connected: false,
+        ip_address: [0, 0, 0, 0],
         books: Vec::new(),
     };
 
@@ -805,6 +842,16 @@ async fn main(peripherals: pins::Peripherals) {
             if connected != state.wifi_connected {
                 state.wifi_connected = connected;
                 dirty = true;
+                
+                if connected {
+                    if let Some(stack) = ariel_os::net::network_stack().await {
+                        if let Some(config) = stack.config_v4() {
+                            state.ip_address = config.address.address().octets();
+                        }
+                    }
+                } else {
+                    state.ip_address = [0, 0, 0, 0];
+                }
             }
         }
 
@@ -974,6 +1021,10 @@ async fn main(peripherals: pins::Peripherals) {
                                 state.screen = Screen::SettingsReader;
                                 dirty = true;
                             }
+                            SettingsItem::Wifi => {
+                                state.screen = Screen::SettingsWifi;
+                                dirty = true;
+                            }
                             SettingsItem::Rotation => {
                                 state.settings.rotation = match state.settings.rotation {
                                     ui::Rotation::Portrait => ui::Rotation::Landscape,
@@ -991,6 +1042,23 @@ async fn main(peripherals: pins::Peripherals) {
                             ui::Rotation::Portrait => ui::Rotation::Landscape,
                             ui::Rotation::Landscape => ui::Rotation::Portrait,
                         };
+                        dirty = true;
+                    }
+                }
+                Screen::SettingsWifi => {
+                    let old = state.settings_wifi_selected;
+                    nav_move(
+                        &mut state.settings_wifi_selected,
+                        ev,
+                        ui::ViewMode::List,
+                        3,
+                    );
+                    if state.settings_wifi_selected != old {
+                        dirty = true;
+                    }
+
+                    if ev == ButtonEvent::Back {
+                        state.screen = Screen::Settings;
                         dirty = true;
                     }
                 }
