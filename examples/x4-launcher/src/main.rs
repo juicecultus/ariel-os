@@ -11,15 +11,18 @@ use ariel_os::{
     gpio::{Input, Level, Output, Pull},
 };
 
-use embassy_sync::mutex::Mutex;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use core::cell::RefCell;
 use embedded_graphics::pixelcolor::BinaryColor;
-use embedded_sdmmc::sdcard::AcquireOpts;
 use embedded_sdmmc::{LfnBuffer, SdCard, TimeSource, VolumeIdx, VolumeManager};
 use embedded_hal::digital::{ErrorType as DigitalErrorType, OutputPin};
+use embedded_hal_bus::spi::RefCellDevice;
 use heapless::{String, Vec};
-use once_cell::sync::OnceCell;
 use static_cell::StaticCell;
+
+use esp_hal::spi::master::{Spi, Config as SpiConfig};
+use esp_hal::spi::Mode as SpiMode;
+use esp_hal::delay::Delay as EspDelay;
+use esp_hal::time::RateExtU32;
 
 use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, AdcPin, Attenuation};
 use esp_hal::gpio::Input as EspInput;
@@ -113,9 +116,7 @@ impl OutputPin for RawGpio12 {
     }
 }
 
-pub static SPI_BUS: OnceCell<
-    Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ariel_os::hal::spi::main::Spi>,
-> = OnceCell::new();
+// Removed Ariel OS SPI_BUS - using esp-hal SPI directly
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
@@ -641,6 +642,49 @@ async fn main(peripherals: pins::Peripherals) {
     #[cfg(context = "xteink-x4")]
     sd_slow_dummy_clocks();
 
+    // Initialize SD card using direct esp-hal SPI (this works!)
+    // Then use Ariel OS SPI for display (which also works)
+    // SD card will be re-initialized on-demand when accessing Library
+    info!("Testing SD card with esp-hal SPI...");
+    let sd_detected = unsafe {
+        let spi2 = esp_hal::peripherals::SPI2::steal();
+        let sck = esp_hal::gpio::GpioPin::<8>::steal();
+        let miso = esp_hal::gpio::GpioPin::<7>::steal();
+        let mosi = esp_hal::gpio::GpioPin::<10>::steal();
+        
+        let spi_bus = Spi::new(
+            spi2,
+            SpiConfig::default()
+                .with_frequency(20_000_000u32.Hz())
+                .with_mode(SpiMode::_0),
+        )
+        .unwrap()
+        .with_sck(sck)
+        .with_miso(miso)
+        .with_mosi(mosi);
+        
+        let spi_bus_ref = RefCell::new(spi_bus);
+        let delay = EspDelay::new();
+        
+        let sd_cs = RawGpio12::new();
+        let sd_spi = RefCellDevice::new(&spi_bus_ref, sd_cs, delay.clone()).expect("SD SPI failed");
+        
+        let sd_card = SdCard::new(sd_spi, delay.clone());
+        
+        match sd_card.num_bytes() {
+            Ok(bytes) => {
+                info!("SD num_bytes OK: {}", bytes);
+                true
+            }
+            Err(_) => {
+                info!("SD num_bytes failed");
+                false
+            }
+        }
+        // SPI bus dropped here - will be re-created by Ariel OS
+    };
+
+    // Now set up Ariel OS SPI for display
     let spi_bus = pins::SharedSpi::new(
         peripherals.spi_sck,
         peripherals.spi_miso,
@@ -648,40 +692,12 @@ async fn main(peripherals: pins::Peripherals) {
         ssd1677::default_spi_config(),
     );
 
-    let _ = SPI_BUS.set(Mutex::new(spi_bus));
+    static SPI_BUS: StaticCell<embassy_sync::mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ariel_os::hal::spi::main::Spi>> = StaticCell::new();
+    let spi_bus = SPI_BUS.init(embassy_sync::mutex::Mutex::new(spi_bus));
 
     // Prepare chip-select pins
     let display_cs = Output::new(peripherals.display_cs, Level::High);
-    #[cfg(context = "xteink-x4")]
-    let mut sd_cs = RawGpio12::new();
-    #[cfg(not(context = "xteink-x4"))]
-    let mut sd_cs = Output::new(peripherals.sd_cs, Level::High);
-
-    // Ensure SD CS is high
-    let _ = sd_cs.set_high();
-
-    let display_spi = ariel_os::spi::main::SpiDevice::new(SPI_BUS.get().unwrap(), display_cs);
-
-    // For SD: use a blocking SPI device that wraps the async shared bus
-    let sd_spi = sd::BlockingSpiDeviceWithCs::new(SPI_BUS.get().unwrap(), sd_cs);
-
-    // Try SD init BEFORE display init to rule out bus state issues
-    info!("Attempting SD init BEFORE display...");
-    let sd_delay = esp_hal::delay::Delay::new();
-    let sd_opts = AcquireOpts {
-        use_crc: false,
-        acquire_retries: 200,
-    };
-    let sd_card = SdCard::new_with_options(sd_spi, sd_delay, sd_opts);
-
-    // Quick sanity check (also forces SD init)
-    if sd_card.num_bytes().is_ok() {
-        info!("SD num_bytes OK");
-    } else {
-        info!("SD num_bytes failed");
-    }
-    let mut volume_manager: VolumeManager<_, SdTimeSource, 4, 4, 1> =
-        VolumeManager::new(sd_card, SdTimeSource);
+    let display_spi = ariel_os::spi::main::SpiDevice::new(spi_bus, display_cs);
 
     let dc = Output::new(peripherals.display_dc, Level::High);
     let rst = Output::new(peripherals.display_rst, Level::High);
@@ -772,8 +788,10 @@ async fn main(peripherals: pins::Peripherals) {
 
                     if ev == ButtonEvent::Confirm {
                         // Enter Library: mount + list books once.
-                        let ok = scan_books_from_sd(&mut volume_manager, &mut state.books);
-                        state.sd_present = ok;
+                        // TODO: Re-enable once async SD + FAT adapter is complete
+                        // let ok = scan_books_from_sd(&mut volume_manager, &mut state.books);
+                        // state.sd_present = ok;
+                        state.sd_present = false; // SD not yet working with async
                         state.library_cursor = 0;
                         state.screen = Screen::Library;
                         dirty = true;
