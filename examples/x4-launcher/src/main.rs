@@ -918,9 +918,14 @@ async fn main(peripherals: pins::Peripherals) {
     render_state(&mut display, &state, ssd1677::RefreshMode::Full).await;
     info!("Home screen rendered");
 
+    let mut last_status_update = ariel_os::time::Instant::now();
+
     loop {
         let mut dirty = false;
         
+        let now = ariel_os::time::Instant::now();
+        let update_status = now.duration_since(last_status_update) >= ariel_os::time::Duration::from_secs(2);
+
         let new_bat = input.read_battery_percentage();
         if new_bat != state.battery_pct {
             state.battery_pct = new_bat;
@@ -929,7 +934,8 @@ async fn main(peripherals: pins::Peripherals) {
 
         // Check Wi-Fi status if enabled
         #[cfg(feature = "wifi-esp")]
-        {
+        if update_status {
+            last_status_update = now;
             let connected = esp_wifi::wifi::wifi_state() == esp_wifi::wifi::WifiState::StaConnected;
             if connected != state.wifi_connected {
                 state.wifi_connected = connected;
@@ -961,7 +967,10 @@ async fn main(peripherals: pins::Peripherals) {
                 state.wifi_mac = mac;
                 dirty = true;
             }
+        }
 
+        #[cfg(feature = "wifi-esp")]
+        {
             // Update scanning status
             let running = ariel_os::hal::wifi::esp_wifi::SCAN_RUNNING.load(core::sync::atomic::Ordering::SeqCst);
             let requested = ariel_os::hal::wifi::esp_wifi::SCAN_REQUESTED.load(core::sync::atomic::Ordering::SeqCst);
