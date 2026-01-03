@@ -715,22 +715,23 @@ async fn render_state<D>(
             ui::draw_chrome(&mut canvas, &l, status, nav);
 
             if state.wifi_scanning {
-                let items = ["Scanning..."];
+                let items = ["Scanning...", "Please wait..."];
                 ui::draw_list_6(&mut canvas, &l, &items[..], 0);
             } else {
                 static mut LABELS: [String<64>; 16] = [const { String::new() }; 16];
                 let mut labels_ref: [&str; 16] = [""; 16];
                 let mut count = 0;
                 
-                if let Ok(res) = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.try_lock() {
-                    count = res.len().min(16);
-                    #[allow(unsafe_code)]
-                    unsafe {
-                        for i in 0..count {
-                            let label = &mut LABELS[i];
-                            label.clear();
-                            let _ = core::fmt::write(label, format_args!("{} ({} dBm)", res[i].ssid, res[i].rssi));
-                        }
+                // Use lock().await to ensure we get results even if the task just finished
+                let res_guard = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.lock().await;
+                count = res_guard.len().min(16);
+                #[allow(unsafe_code)]
+                unsafe {
+                    for i in 0..count {
+                        let label = &mut LABELS[i];
+                        label.clear();
+                        let _ = core::fmt::write(label, format_args!("{} ({} dBm)", res_guard[i].ssid, res_guard[i].rssi));
+                        labels_ref[i] = LABELS[i].as_str();
                     }
                 }
 
@@ -738,12 +739,6 @@ async fn render_state<D>(
                     let items = ["No networks found", "Press OK to scan"];
                     ui::draw_list_6(&mut canvas, &l, &items[..], state.wifi_scan_selected);
                 } else {
-                    #[allow(unsafe_code)]
-                    unsafe {
-                        for i in 0..count {
-                            labels_ref[i] = LABELS[i].as_str();
-                        }
-                    }
                     ui::draw_list_6(&mut canvas, &l, &labels_ref[..count], state.wifi_scan_selected);
                 }
             }
@@ -940,8 +935,8 @@ async fn main(peripherals: pins::Peripherals) {
             }
 
             // Update scanning status
-            if state.wifi_scanning && !ariel_os::hal::wifi::esp_wifi::SCAN_REQUESTED.load(core::sync::atomic::Ordering::SeqCst) {
-                // Scan should be done (or at least request cleared)
+            let running = ariel_os::hal::wifi::esp_wifi::SCAN_RUNNING.load(core::sync::atomic::Ordering::SeqCst);
+            if state.wifi_scanning && !running {
                 state.wifi_scanning = false;
                 dirty = true;
             }
@@ -1195,7 +1190,7 @@ async fn main(peripherals: pins::Peripherals) {
                     if let Ok(res) = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.try_lock() {
                         count = res.len();
                     }
-                    if count == 0 { count = 2; } // "No networks found" + "Press OK to scan"
+                    if count == 0 { count = 2; }
 
                     let old = state.wifi_scan_selected;
                     nav_move(
@@ -1214,18 +1209,18 @@ async fn main(peripherals: pins::Peripherals) {
                     }
 
                     if ev == ButtonEvent::Confirm {
+                        let mut res_opt = None;
                         if let Ok(res) = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.try_lock() {
                             if state.wifi_scan_selected < res.len() {
-                                state.wifi_ssid = res[state.wifi_scan_selected].ssid.clone();
-                                ariel_os::hal::wifi::set_credentials(state.wifi_ssid.as_str(), state.wifi_password.as_str());
-                                state.screen = Screen::SettingsWifi;
-                                dirty = true;
-                            } else {
-                                // Trigger scan
-                                ariel_os::hal::wifi::esp_wifi::request_scan();
-                                state.wifi_scanning = true;
-                                dirty = true;
+                                res_opt = Some(res[state.wifi_scan_selected].ssid.clone());
                             }
+                        }
+
+                        if let Some(ssid) = res_opt {
+                            state.wifi_ssid = ssid;
+                            ariel_os::hal::wifi::set_credentials(state.wifi_ssid.as_str(), state.wifi_password.as_str());
+                            state.screen = Screen::SettingsWifi;
+                            dirty = true;
                         } else {
                             // Trigger scan
                             ariel_os::hal::wifi::esp_wifi::request_scan();
