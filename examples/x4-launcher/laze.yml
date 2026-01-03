@@ -2,6 +2,12 @@ apps:
   - name: x4-launcher
     context:
       - xteink-x4
+    env:
+      global:
+        executor_stacksize_required:
+          - "16384"
+        isr_stacksize_required:
+          - "32768"
     selects:
       - network-config-ipv4-dhcp
       - wifi-esp

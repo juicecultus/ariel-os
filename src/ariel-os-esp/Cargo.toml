@@ -38,6 +38,7 @@ ariel-os-random = { workspace = true, optional = true }
 ariel-os-threads = { workspace = true, optional = true }
 ariel-os-utils = { workspace = true }
 critical-section = { workspace = true }
+embassy-futures = { workspace = true }
 embassy-sync = { workspace = true }
 heapless = { workspace = true }
 static_cell = { workspace = true }

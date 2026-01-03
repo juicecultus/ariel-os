@@ -718,14 +718,19 @@ async fn render_state<D>(
                 let items = ["Scanning..."];
                 ui::draw_list_6(&mut canvas, &l, &items[..], 0);
             } else {
-                let mut labels: [String<64>; 16] = Default::default();
+                static mut LABELS: [String<64>; 16] = [const { String::new() }; 16];
                 let mut labels_ref: [&str; 16] = [""; 16];
                 let mut count = 0;
                 
                 if let Ok(res) = ariel_os::hal::wifi::esp_wifi::SCAN_RESULTS.try_lock() {
                     count = res.len().min(16);
-                    for i in 0..count {
-                        let _ = core::fmt::write(&mut labels[i], format_args!("{} ({} dBm)", res[i].ssid, res[i].rssi));
+                    #[allow(unsafe_code)]
+                    unsafe {
+                        for i in 0..count {
+                            let label = &mut LABELS[i];
+                            label.clear();
+                            let _ = core::fmt::write(label, format_args!("{} ({} dBm)", res[i].ssid, res[i].rssi));
+                        }
                     }
                 }
 
@@ -733,8 +738,11 @@ async fn render_state<D>(
                     let items = ["No networks found", "Press OK to scan"];
                     ui::draw_list_6(&mut canvas, &l, &items[..], state.wifi_scan_selected);
                 } else {
-                    for i in 0..count {
-                        labels_ref[i] = labels[i].as_str();
+                    #[allow(unsafe_code)]
+                    unsafe {
+                        for i in 0..count {
+                            labels_ref[i] = LABELS[i].as_str();
+                        }
                     }
                     ui::draw_list_6(&mut canvas, &l, &labels_ref[..count], state.wifi_scan_selected);
                 }

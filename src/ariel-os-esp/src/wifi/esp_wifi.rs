@@ -14,12 +14,15 @@ use once_cell::sync::OnceCell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as AsyncMutex;
+use embassy_sync::signal::Signal;
 use heapless::{String, Vec};
 
 pub type NetworkDevice = WifiDevice<'static, WifiStaDevice>;
 
 pub static RECONNECT: AtomicBool = AtomicBool::new(false);
 pub static SCAN_REQUESTED: AtomicBool = AtomicBool::new(false);
+pub static SCAN_RUNNING: AtomicBool = AtomicBool::new(false);
+static WAKEUP_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 pub struct ScanResult {
     pub ssid: String<32>,
@@ -31,10 +34,12 @@ pub static SCAN_RESULTS: AsyncMutex<CriticalSectionRawMutex, Vec<ScanResult, 16>
 
 pub fn reconnect() {
     RECONNECT.store(true, Ordering::SeqCst);
+    WAKEUP_SIGNAL.signal(());
 }
 
 pub fn request_scan() {
     SCAN_REQUESTED.store(true, Ordering::SeqCst);
+    WAKEUP_SIGNAL.signal(());
 }
 
 // Ideally, all Wi-Fi initialization would happen here.
@@ -65,6 +70,8 @@ async fn connection(mut controller: WifiController<'static>) {
     debug!("Device capabilities: {:?}", controller.capabilities());
 
     loop {
+        WAKEUP_SIGNAL.reset();
+
         if RECONNECT.load(Ordering::SeqCst) {
             RECONNECT.store(false, Ordering::SeqCst);
             info!("Reconnection requested, restarting Wi-Fi...");
@@ -73,6 +80,7 @@ async fn connection(mut controller: WifiController<'static>) {
 
         if SCAN_REQUESTED.load(Ordering::SeqCst) {
             SCAN_REQUESTED.store(false, Ordering::SeqCst);
+            SCAN_RUNNING.store(true, Ordering::SeqCst);
             info!("Scanning for Wi-Fi networks...");
             
             // We need to be started to scan
@@ -88,13 +96,15 @@ async fn connection(mut controller: WifiController<'static>) {
                     results.clear();
                     for net in networks {
                         let mut ssid = String::new();
-                        let _ = ssid.push_str(net.ssid.as_str());
+                        let ssid_str = net.ssid.as_str();
+                        let _ = ssid.push_str(ssid_str);
+                        info!("Found network: SSID=\"{}\", RSSI={}", ssid_str, net.signal_strength);
                         let _ = results.push(ScanResult {
                             ssid,
                             rssi: net.signal_strength,
                         });
                     }
-                    info!("Found {} networks", results.len());
+                    info!("Scan complete: found {} networks", results.len());
                 }
                 Err(e) => {
                     info!("Scan failed: {:?}", e);
@@ -104,12 +114,16 @@ async fn connection(mut controller: WifiController<'static>) {
             if !was_started {
                 let _ = controller.stop_async().await;
             }
+            SCAN_RUNNING.store(false, Ordering::SeqCst);
         }
 
         match esp_wifi::wifi::wifi_state() {
             WifiState::StaConnected => {
-                // wait until we're no longer connected
-                controller.wait_for_event(WifiEvent::StaDisconnected).await;
+                // wait until we're no longer connected or a signal arrives
+                embassy_futures::select::select(
+                    controller.wait_for_event(WifiEvent::StaDisconnected),
+                    WAKEUP_SIGNAL.wait()
+                ).await;
                 Timer::after(Duration::from_secs(5)).await
             }
             _ => {}
@@ -117,23 +131,53 @@ async fn connection(mut controller: WifiController<'static>) {
         if !matches!(controller.is_started(), Ok(true)) {
             debug!("Configuring Wi-Fi");
             let (ssid, password) = crate::wifi::get_credentials();
-            let client_config = Configuration::Client(ClientConfiguration {
-                ssid: ssid.as_str().try_into().unwrap(),
-                password: password.as_str().try_into().unwrap(),
-                ..Default::default()
-            });
-            controller.set_configuration(&client_config).unwrap();
-            debug!("Starting Wi-Fi");
-            controller.start_async().await.unwrap();
-            debug!("Wi-Fi started!");
+            if !ssid.is_empty() {
+                let client_config = Configuration::Client(ClientConfiguration {
+                    ssid: ssid.as_str().try_into().unwrap(),
+                    password: password.as_str().try_into().unwrap(),
+                    ..Default::default()
+                });
+                controller.set_configuration(&client_config).unwrap();
+                debug!("Starting Wi-Fi");
+                controller.start_async().await.unwrap();
+                debug!("Wi-Fi started!");
+            } else {
+                debug!("No SSID configured, waiting for user input...");
+                // Wait for a signal (reconnect/scan) or a long timeout
+                embassy_futures::select::select(
+                    WAKEUP_SIGNAL.wait(),
+                    Timer::after(Duration::from_secs(30))
+                ).await;
+                continue;
+            }
         }
-        debug!("About to connect...");
 
-        match controller.connect_async().await {
-            Ok(_) => info!("Wifi connected!"),
-            Err(e) => {
+        let (ssid, _) = crate::wifi::get_credentials();
+        if ssid.is_empty() {
+            debug!("SSID still empty, skipping connection attempt");
+            embassy_futures::select::select(
+                WAKEUP_SIGNAL.wait(),
+                Timer::after(Duration::from_secs(10))
+            ).await;
+            continue;
+        }
+
+        debug!("About to connect to {}...", ssid);
+
+        match embassy_futures::select::select(
+            controller.connect_async(),
+            WAKEUP_SIGNAL.wait()
+        ).await {
+            embassy_futures::select::Either::First(Ok(_)) => info!("Wifi connected!"),
+            embassy_futures::select::Either::First(Err(e)) => {
                 info!("Failed to connect to Wi-Fi: {:?}", e);
-                Timer::after(Duration::from_millis(5000)).await
+                embassy_futures::select::select(
+                    WAKEUP_SIGNAL.wait(),
+                    Timer::after(Duration::from_millis(5000))
+                ).await;
+            }
+            embassy_futures::select::Either::Second(_) => {
+                debug!("Connection interrupted by signal");
             }
         }
     }
