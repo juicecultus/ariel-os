@@ -28,6 +28,8 @@ use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, AdcPin, Attenuation};
 use esp_hal::gpio::Input as EspInput;
 use esp_hal::peripherals::ADC1;
 
+use core::str::FromStr;
+
 #[cfg(context = "xteink-x4")]
 #[allow(unsafe_code)]
 fn init_gpio12_output_mux() {
@@ -468,6 +470,10 @@ struct AppState {
     battery_pct: u8,
     wifi_connected: bool,
     ip_address: [u8; 4],
+    wifi_rssi: i8,
+    wifi_mac: [u8; 6],
+    wifi_ssid: String<32>,
+    wifi_password: String<64>,
     books: Vec<String<64>, 48>,
 }
 
@@ -682,7 +688,17 @@ async fn render_state<D>(
                 let _ = line2.push_str("0.0.0.0");
             }
 
-            let items = [line0.as_str(), line1.as_str(), line2.as_str()];
+            let mut line3: String<64> = String::new();
+            let _ = line3.push_str("MAC: ");
+            let _ = core::fmt::write(&mut line3, format_args!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                state.wifi_mac[0], state.wifi_mac[1], state.wifi_mac[2],
+                state.wifi_mac[3], state.wifi_mac[4], state.wifi_mac[5]));
+
+            let mut line4: String<64> = String::new();
+            let _ = line4.push_str("RSSI: ");
+            let _ = core::fmt::write(&mut line4, format_args!("{} dBm", state.wifi_rssi));
+
+            let items = [line0.as_str(), "Edit Password", line1.as_str(), line2.as_str(), line3.as_str(), line4.as_str(), "Reconnect"];
             ui::draw_list_6(&mut canvas, &l, &items[..], state.settings_wifi_selected);
         }
         Screen::SettingsReader => {
@@ -817,6 +833,10 @@ async fn main(peripherals: pins::Peripherals) {
         battery_pct: 100,
         wifi_connected: false,
         ip_address: [0, 0, 0, 0],
+        wifi_rssi: 0,
+        wifi_mac: [0; 6],
+        wifi_ssid: String::from_str(ariel_os::hal::wifi::WIFI_NETWORK).unwrap_or_default(),
+        wifi_password: String::from_str(ariel_os::hal::wifi::WIFI_PASSWORD).unwrap_or_default(),
         books: Vec::new(),
     };
 
@@ -852,6 +872,22 @@ async fn main(peripherals: pins::Peripherals) {
                 } else {
                     state.ip_address = [0, 0, 0, 0];
                 }
+            }
+
+            if state.wifi_connected {
+                let rssi = esp_wifi::wifi::get_rssi().unwrap_or(0);
+                if rssi != state.wifi_rssi {
+                    state.wifi_rssi = rssi;
+                    dirty = true;
+                }
+            } else {
+                state.wifi_rssi = 0;
+            }
+
+            let mac = esp_wifi::wifi::get_mac(esp_wifi::wifi::WifiStaDevice);
+            if mac != state.wifi_mac {
+                state.wifi_mac = mac;
+                dirty = true;
             }
         }
 
@@ -1051,7 +1087,7 @@ async fn main(peripherals: pins::Peripherals) {
                         &mut state.settings_wifi_selected,
                         ev,
                         ui::ViewMode::List,
-                        3,
+                        7,
                     );
                     if state.settings_wifi_selected != old {
                         dirty = true;
@@ -1060,6 +1096,37 @@ async fn main(peripherals: pins::Peripherals) {
                     if ev == ButtonEvent::Back {
                         state.screen = Screen::Settings;
                         dirty = true;
+                    }
+
+                    if ev == ButtonEvent::Confirm {
+                        match state.settings_wifi_selected {
+                            0 => {
+                                // SSID cycle for demo or future keyboard
+                                if state.wifi_ssid == "dummy" {
+                                    state.wifi_ssid = String::from_str("YourSSID").unwrap_or_default();
+                                } else {
+                                    state.wifi_ssid = String::from_str("dummy").unwrap_or_default();
+                                }
+                                ariel_os::hal::wifi::set_credentials(state.wifi_ssid.as_str(), state.wifi_password.as_str());
+                                dirty = true;
+                            }
+                            1 => {
+                                // Password cycle for demo
+                                if state.wifi_password == "dummy" {
+                                    state.wifi_password = String::from_str("YourPassword").unwrap_or_default();
+                                } else {
+                                    state.wifi_password = String::from_str("dummy").unwrap_or_default();
+                                }
+                                ariel_os::hal::wifi::set_credentials(state.wifi_ssid.as_str(), state.wifi_password.as_str());
+                                dirty = true;
+                            }
+                            6 => {
+                                #[cfg(feature = "wifi-esp")]
+                                ariel_os::hal::wifi::esp_wifi::reconnect();
+                                info!("Reconnection triggered");
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 Screen::SettingsReader => {

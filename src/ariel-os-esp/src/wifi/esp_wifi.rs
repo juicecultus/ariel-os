@@ -1,3 +1,4 @@
+use core::sync::atomic::{AtomicBool, Ordering};
 use ariel_os_debug::log::{debug, info};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
@@ -12,6 +13,12 @@ use esp_wifi::{
 use once_cell::sync::OnceCell;
 
 pub type NetworkDevice = WifiDevice<'static, WifiStaDevice>;
+
+pub static RECONNECT: AtomicBool = AtomicBool::new(false);
+
+pub fn reconnect() {
+    RECONNECT.store(true, Ordering::SeqCst);
+}
 
 // Ideally, all Wi-Fi initialization would happen here.
 // Unfortunately that's complicated, so we're using WIFI_INIT to pass the
@@ -41,6 +48,12 @@ async fn connection(mut controller: WifiController<'static>) {
     debug!("Device capabilities: {:?}", controller.capabilities());
 
     loop {
+        if RECONNECT.load(Ordering::SeqCst) {
+            RECONNECT.store(false, Ordering::SeqCst);
+            info!("Reconnection requested, restarting Wi-Fi...");
+            let _ = controller.stop_async().await;
+        }
+
         match esp_wifi::wifi::wifi_state() {
             WifiState::StaConnected => {
                 // wait until we're no longer connected
@@ -51,9 +64,10 @@ async fn connection(mut controller: WifiController<'static>) {
         }
         if !matches!(controller.is_started(), Ok(true)) {
             debug!("Configuring Wi-Fi");
+            let (ssid, password) = crate::wifi::get_credentials();
             let client_config = Configuration::Client(ClientConfiguration {
-                ssid: crate::wifi::WIFI_NETWORK.try_into().unwrap(),
-                password: crate::wifi::WIFI_PASSWORD.try_into().unwrap(),
+                ssid: ssid.as_str().try_into().unwrap(),
+                password: password.as_str().try_into().unwrap(),
                 ..Default::default()
             });
             controller.set_configuration(&client_config).unwrap();

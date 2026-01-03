@@ -266,17 +266,18 @@ where
 
     let mut x = canvas.bounding_box().bottom_right().unwrap().x - 16;
 
+    draw_battery_icon(canvas, Point::new(x, 18), status.battery_pct);
+    
     if let Some(pct) = status.battery_pct {
         let mut pct_str: String<8> = String::new();
         let _ = core::fmt::write(&mut pct_str, format_args!("{}%", pct));
         let pct_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
-        Text::new(pct_str.as_str(), Point::new(x - 64, 28), pct_style)
+        // Position text to the left of the battery icon
+        Text::new(pct_str.as_str(), Point::new(x - 60, 28), pct_style)
             .draw(canvas)
             .ok();
     }
-
-    draw_battery_icon(canvas, Point::new(x, 18), status.battery_pct);
-    x -= 74;
+    x -= 70;
 
     draw_toggle_icon(canvas, Point::new(x - 44, 18), "SD", status.sd_present);
     x -= 54;
@@ -310,7 +311,7 @@ pub fn draw_list_6<D>(
     canvas: &mut UiCanvas<'_, D>,
     l: &UiLayout,
     items: &[&str],
-    selected: usize,
+    cursor: usize,
 ) where
     D: embedded_hal_async::spi::SpiDevice<u8>,
 {
@@ -320,8 +321,12 @@ pub fn draw_list_6<D>(
     let text_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let text_style_inv = MonoTextStyle::new(&FONT_10X20, BinaryColor::Off);
 
-    for row in 0..6 {
-        let y = l.content.top_left.y + pad + (row * row_h);
+    let page_start = (cursor / 6) * 6;
+    let page_items = items.iter().skip(page_start).take(6);
+    let selected_in_page = cursor - page_start;
+
+    for (row, label) in page_items.enumerate() {
+        let y = l.content.top_left.y + pad + (row as i32 * row_h);
         let r = Rectangle::new(
             Point::new(l.content.top_left.x + pad, y),
             Size::new(
@@ -330,7 +335,7 @@ pub fn draw_list_6<D>(
             ),
         );
 
-        let is_sel = row as usize == selected;
+        let is_sel = row == selected_in_page;
 
         if is_sel {
             let style = PrimitiveStyleBuilder::new()
@@ -345,13 +350,10 @@ pub fn draw_list_6<D>(
                 .ok();
         }
 
-        if row < items.len() as i32 {
-            let label = items[row as usize];
-            let t_style = if is_sel { text_style_inv } else { text_style };
-            Text::new(label, Point::new(r.top_left.x + 14, r.top_left.y + 26), t_style)
-                .draw(canvas)
-                .ok();
-        }
+        let t_style = if is_sel { text_style_inv } else { text_style };
+        Text::new(label, Point::new(r.top_left.x + 14, r.top_left.y + 26), t_style)
+            .draw(canvas)
+            .ok();
     }
 }
 
