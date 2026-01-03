@@ -5,10 +5,31 @@ apps:
     env:
       global:
         executor_stacksize_required:
-          - "10240"
+          - "8192"
         isr_stacksize_required:
-          - "32768"
-        esp_wifi_heapsize_required: $(160*1024)
+          - "28672"
+        esp_wifi_heapsize_required: $(170*1024)
+        CARGO_ENV:
+          - ESP_WIFI_CONFIG_RX_QUEUE_SIZE=5
+          - ESP_WIFI_CONFIG_TX_QUEUE_SIZE=3
+          - ESP_WIFI_CONFIG_STATIC_RX_BUF_NUM=10
+          - ESP_WIFI_CONFIG_DYNAMIC_RX_BUF_NUM=32
+          - ESP_WIFI_CONFIG_STATIC_TX_BUF_NUM=0
+          - ESP_WIFI_CONFIG_DYNAMIC_TX_BUF_NUM=32
+          - ESP_WIFI_CONFIG_AMPDU_RX_ENABLE=true
+          - ESP_WIFI_CONFIG_AMPDU_TX_ENABLE=true
+          - ESP_WIFI_CONFIG_AMSDU_TX_ENABLE=false
+          - ESP_WIFI_CONFIG_RX_BA_WIN=6
+          - ESP_WIFI_CONFIG_MAX_BURST_SIZE=1
+          - ESP_WIFI_CONFIG_COUNTRY_CODE=CN
+          - ESP_WIFI_CONFIG_COUNTRY_CODE_OPERATING_CLASS=0
+          - ESP_WIFI_CONFIG_MTU=1492
+          - ESP_WIFI_CONFIG_TICK_RATE_HZ=100
+          - ESP_WIFI_CONFIG_LISTEN_INTERVAL=3
+          - ESP_WIFI_CONFIG_BEACON_TIMEOUT=6
+          - ESP_WIFI_CONFIG_AP_BEACON_TIMEOUT=300
+          - ESP_WIFI_CONFIG_FAILURE_RETRY_CNT=1
+          - ESP_WIFI_CONFIG_SCAN_METHOD=0
     selects:
       - network-config-ipv4-dhcp
       - wifi-esp

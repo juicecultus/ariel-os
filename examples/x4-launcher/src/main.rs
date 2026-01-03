@@ -918,15 +918,22 @@ async fn main(peripherals: pins::Peripherals) {
     render_state(&mut display, &state, ssd1677::RefreshMode::Full).await;
     info!("Home screen rendered");
 
+    #[cfg(feature = "wifi-esp")]
     let mut last_status_update = ariel_os::time::Instant::now();
-    let _ = last_status_update;
 
     loop {
         let mut dirty = false;
         
-        let now = ariel_os::time::Instant::now();
-        let update_status = now.duration_since(last_status_update) >= ariel_os::time::Duration::from_secs(2);
-        let _ = update_status;
+        #[cfg(feature = "wifi-esp")]
+        let update_status = {
+            let now = ariel_os::time::Instant::now();
+            if now.duration_since(last_status_update) >= ariel_os::time::Duration::from_secs(2) {
+                last_status_update = now;
+                true
+            } else {
+                false
+            }
+        };
 
         let new_bat = input.read_battery_percentage();
         if new_bat != state.battery_pct {

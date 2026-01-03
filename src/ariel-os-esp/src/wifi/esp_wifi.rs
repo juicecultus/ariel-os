@@ -84,8 +84,7 @@ async fn connection(mut controller: WifiController<'static>) {
             info!("Scanning for Wi-Fi networks...");
             
             // We need to be started to scan
-            let was_started = matches!(controller.is_started(), Ok(true));
-            if !was_started {
+            if !matches!(controller.is_started(), Ok(true)) {
                 let _ = controller.start_async().await;
             }
 
@@ -111,9 +110,6 @@ async fn connection(mut controller: WifiController<'static>) {
                 }
             }
 
-            if !was_started {
-                let _ = controller.stop_async().await;
-            }
             SCAN_RUNNING.store(false, Ordering::SeqCst);
         }
 
@@ -129,37 +125,39 @@ async fn connection(mut controller: WifiController<'static>) {
             _ => {}
         }
         if !matches!(controller.is_started(), Ok(true)) {
-            debug!("Configuring Wi-Fi");
-            let (ssid, password) = crate::wifi::get_credentials();
-            if !ssid.is_empty() {
-                let client_config = Configuration::Client(ClientConfiguration {
-                    ssid: ssid.as_str().try_into().unwrap(),
-                    password: password.as_str().try_into().unwrap(),
-                    ..Default::default()
-                });
-                controller.set_configuration(&client_config).unwrap();
-                debug!("Starting Wi-Fi");
-                controller.start_async().await.unwrap();
-                debug!("Wi-Fi started!");
-            } else {
-                debug!("No SSID configured, waiting for user input...");
-                // Wait for a signal (reconnect/scan) or a long timeout
-                embassy_futures::select::select(
-                    WAKEUP_SIGNAL.wait(),
-                    Timer::after(Duration::from_secs(30))
-                ).await;
+            debug!("Starting Wi-Fi radio...");
+            // Always start the radio so background scanning and status checks work
+            if let Err(e) = controller.start_async().await {
+                info!("Failed to start Wi-Fi radio: {:?}", e);
+                Timer::after(Duration::from_secs(5)).await;
                 continue;
             }
+            debug!("Wi-Fi radio started!");
         }
 
-        let (ssid, _) = crate::wifi::get_credentials();
+        let (ssid, password) = crate::wifi::get_credentials();
         if ssid.is_empty() {
-            debug!("SSID still empty, skipping connection attempt");
+            debug!("No SSID configured, waiting for user input or scan request...");
+            // Wait for a signal (reconnect/scan) or a timeout
             embassy_futures::select::select(
                 WAKEUP_SIGNAL.wait(),
-                Timer::after(Duration::from_secs(10))
+                Timer::after(Duration::from_secs(30))
             ).await;
             continue;
+        }
+
+        // Apply configuration if started but not connected
+        if esp_wifi::wifi::wifi_state() != WifiState::StaConnected {
+            let client_config = Configuration::Client(ClientConfiguration {
+                ssid: ssid.as_str().try_into().unwrap(),
+                password: password.as_str().try_into().unwrap(),
+                ..Default::default()
+            });
+            if let Err(e) = controller.set_configuration(&client_config) {
+                info!("Failed to set Wi-Fi config: {:?}", e);
+                Timer::after(Duration::from_secs(5)).await;
+                continue;
+            }
         }
 
         debug!("About to connect to {}...", ssid);
