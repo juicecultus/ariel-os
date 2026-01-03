@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 
+mod epub;
 mod pins;
 mod sd;
 mod ssd1677;
@@ -13,7 +14,7 @@ use ariel_os::{
 
 use core::cell::RefCell;
 use embedded_graphics::pixelcolor::BinaryColor;
-use embedded_sdmmc::{LfnBuffer, SdCard, TimeSource, VolumeIdx, VolumeManager};
+use embedded_sdmmc::{LfnBuffer, Mode, SdCard, TimeSource, VolumeIdx, VolumeManager};
 use embedded_hal::digital::{ErrorType as DigitalErrorType, OutputPin};
 use embedded_hal_bus::spi::RefCellDevice;
 use heapless::{String, Vec};
@@ -123,6 +124,7 @@ enum Screen {
     Home,
     Apps,
     Library,
+    Reader,
     Tools,
     Settings,
     SettingsReader,
@@ -306,7 +308,7 @@ where
 
 fn scan_books_from_sd<D>(
     vm: &mut VolumeManager<D, SdTimeSource, 4, 4, 1>,
-    out: &mut Vec<String<64>, 48>,
+    out: &mut Vec<String<64>, 16>,
 ) -> bool
 where
     D: embedded_sdmmc::BlockDevice,
@@ -408,7 +410,7 @@ where
 
 /// Scan books from SD card using direct esp-hal SPI (bypasses Ariel OS SPI)
 /// This temporarily takes over the SPI bus, scans, then releases it.
-fn scan_books_direct(out: &mut Vec<String<64>, 48>) -> bool {
+fn scan_books_direct(out: &mut Vec<String<64>, 16>) -> bool {
     fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
         let s = s.as_bytes();
         let suf = suffix.as_bytes();
@@ -524,6 +526,155 @@ fn scan_books_direct(out: &mut Vec<String<64>, 48>) -> bool {
     }
 }
 
+/// Load text content from an EPUB file using direct esp-hal SPI
+fn load_epub_text(book_path: &str) -> Option<String<256>> {
+    info!("Loading EPUB: {}", book_path);
+    
+    unsafe {
+        let spi2 = esp_hal::peripherals::SPI2::steal();
+        let sck = esp_hal::gpio::GpioPin::<8>::steal();
+        let miso = esp_hal::gpio::GpioPin::<7>::steal();
+        let mosi = esp_hal::gpio::GpioPin::<10>::steal();
+        
+        let spi_bus = Spi::new(
+            spi2,
+            SpiConfig::default()
+                .with_frequency(20_000_000u32.Hz())
+                .with_mode(SpiMode::_0),
+        )
+        .unwrap()
+        .with_sck(sck)
+        .with_miso(miso)
+        .with_mosi(mosi);
+        
+        let spi_bus_ref = RefCell::new(spi_bus);
+        let delay = EspDelay::new();
+        
+        let sd_cs = RawGpio12::new();
+        let sd_spi = match RefCellDevice::new(&spi_bus_ref, sd_cs, delay.clone()) {
+            Ok(spi) => spi,
+            Err(_) => {
+                info!("Failed to create SD SPI device");
+                return None;
+            }
+        };
+        
+        let sd_card = SdCard::new(sd_spi, delay.clone());
+        
+        if sd_card.num_bytes().is_err() {
+            info!("SD card not detected");
+            return None;
+        }
+        info!("SD card detected for EPUB load");
+        
+        let mut vm: VolumeManager<_, SdTimeSource, 4, 4, 1> = VolumeManager::new(sd_card, SdTimeSource);
+        
+        let volume = match vm.open_volume(VolumeIdx(0)) {
+            Ok(v) => v,
+            Err(_) => {
+                info!("Failed to open volume");
+                return None;
+            }
+        };
+        info!("Volume opened");
+        
+        let root = match volume.open_root_dir() {
+            Ok(r) => r,
+            Err(_) => {
+                info!("Failed to open root dir");
+                return None;
+            }
+        };
+        info!("Root dir opened");
+        
+        // First open books directory
+        let books_dir = match root.open_dir("books") {
+            Ok(d) => d,
+            Err(_) => {
+                info!("Failed to open books dir");
+                return None;
+            }
+        };
+        info!("Books dir opened");
+        
+        // Extract just the filename (remove "books/" prefix)
+        let filename = if book_path.starts_with("books/") {
+            &book_path[6..]
+        } else {
+            book_path
+        };
+        info!("Looking for file: {}", filename);
+        
+        // Find the file by iterating with LFN support
+        let mut found_entry: Option<embedded_sdmmc::DirEntry> = None;
+        let mut lfn_storage = [0u8; 192];
+        let mut lfn_buf = LfnBuffer::new(&mut lfn_storage);
+        
+        let _ = books_dir.iterate_dir_lfn(&mut lfn_buf, |entry, lfn| {
+            let entry_name = if let Some(name) = lfn {
+                name
+            } else {
+                // Fallback to short name
+                let base = core::str::from_utf8(entry.name.base_name()).unwrap_or("");
+                let ext = core::str::from_utf8(entry.name.extension()).unwrap_or("");
+                // Can't easily construct full name here, skip
+                return;
+            };
+            
+            if entry_name == filename {
+                found_entry = Some(entry.clone());
+            }
+        });
+        
+        let entry = match found_entry {
+            Some(e) => e,
+            None => {
+                info!("File not found in directory");
+                return None;
+            }
+        };
+        info!("Found matching entry");
+        
+        // Open the file using the short name from the entry
+        let mut file = match books_dir.open_file_in_dir(&entry.name, Mode::ReadOnly) {
+            Ok(f) => f,
+            Err(_) => {
+                info!("Failed to open EPUB file by short name");
+                return None;
+            }
+        };
+        info!("EPUB file opened, size: {}", file.length());
+        
+        // Read first 512 bytes to check if it's a ZIP
+        let mut header = [0u8; 512];
+        let bytes_read = file.read(&mut header).ok()?;
+        
+        if bytes_read < 4 || header[0] != 0x50 || header[1] != 0x4b {
+            info!("Not a valid ZIP/EPUB file");
+            return None;
+        }
+        
+        info!("EPUB file opened, size: {}", file.length());
+        
+        // For now, just return a placeholder with file info
+        let mut content: String<256> = String::new();
+        let _ = content.push_str("EPUB: ");
+        let _ = content.push_str(book_path);
+        let _ = content.push_str("\n\nFile size: ");
+        
+        // Format file size
+        let size = file.length();
+        let mut size_str: String<16> = String::new();
+        let _ = core::fmt::write(&mut size_str, format_args!("{}", size));
+        let _ = content.push_str(size_str.as_str());
+        let _ = content.push_str(" bytes\n\n");
+        let _ = content.push_str("EPUB parsing coming soon...\n");
+        let _ = content.push_str("Press Back to return to Library.");
+        
+        Some(content)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct UiSettings {
     rotation: ui::Rotation,
@@ -541,7 +692,10 @@ struct AppState {
     settings_reader_selected: usize,
     settings: UiSettings,
     sd_present: bool,
-    books: Vec<String<64>, 48>,
+    books: Vec<String<64>, 16>, // Reduced from 48 to 16 to save stack space
+    current_book_index: Option<usize>,
+    reader_page: usize,
+    reader_content: String<256>, // Reduced from 512 to save stack space
 }
 
 fn clamp_selection(sel: &mut usize, len: usize) {
@@ -694,6 +848,25 @@ async fn render_state<D>(
                     }
                 }
             }
+        }
+        Screen::Reader => {
+            // Get book title for status bar
+            let title = state.current_book_index
+                .and_then(|i| state.books.get(i))
+                .map(|s| s.as_str())
+                .unwrap_or("Reader");
+            
+            let status = ui::UiStatus {
+                title,
+                battery_pct: None,
+                sd_present: state.sd_present,
+                wifi_on: false,
+                bt_on: false,
+            };
+            ui::draw_chrome(&mut canvas, &l, status, nav);
+            
+            // Draw reader content
+            ui::draw_reader_content(&mut canvas, &l, state.reader_content.as_str(), state.reader_page);
         }
         Screen::Tools => {
             let status = ui::UiStatus {
@@ -854,6 +1027,9 @@ async fn main(peripherals: pins::Peripherals) {
         },
         sd_present: false,
         books: Vec::new(),
+        current_book_index: None,
+        reader_page: 0,
+        reader_content: String::new(),
     };
 
     info!("Rendering home screen...");
@@ -993,8 +1169,49 @@ async fn main(peripherals: pins::Peripherals) {
 
                     if ev == ButtonEvent::Confirm {
                         if let Some(name) = state.books.get(state.library_cursor) {
-                            info!("Selected book: {}", name.as_str());
+                            info!("Opening book: {}", name.as_str());
+                            state.current_book_index = Some(state.library_cursor);
+                            state.reader_page = 0;
+                            state.reader_content.clear();
+                            
+                            // Load EPUB content
+                            let book_path = {
+                                let mut p: String<128> = String::new();
+                                let _ = p.push_str("books/");
+                                let _ = p.push_str(name.as_str());
+                                p
+                            };
+                            
+                            // Try to load first chapter text
+                            if let Some(content) = load_epub_text(&book_path) {
+                                state.reader_content = content;
+                            } else {
+                                let _ = state.reader_content.push_str("Failed to load book content");
+                            }
+                            
+                            state.screen = Screen::Reader;
+                            dirty = true;
                         }
+                    }
+                }
+                Screen::Reader => {
+                    match ev {
+                        ButtonEvent::Back => {
+                            state.screen = Screen::Library;
+                            state.current_book_index = None;
+                            dirty = true;
+                        }
+                        ButtonEvent::Down | ButtonEvent::Right => {
+                            state.reader_page += 1;
+                            dirty = true;
+                        }
+                        ButtonEvent::Up | ButtonEvent::Left => {
+                            if state.reader_page > 0 {
+                                state.reader_page -= 1;
+                                dirty = true;
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 Screen::Tools => {

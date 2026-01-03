@@ -397,3 +397,72 @@ pub fn draw_grid_2x3<D>(
         }
     }
 }
+
+pub fn draw_reader_content<D>(canvas: &mut UiCanvas<'_, D>, layout: &UiLayout, content: &str, page: usize)
+where
+    D: embedded_hal_async::spi::SpiDevice<u8>,
+{
+    let text_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
+    
+    let content_area = layout.content;
+    let margin = 10;
+    let line_height = 24;
+    let chars_per_line = ((content_area.size.width as i32 - margin * 2) / 10) as usize;
+    let lines_per_page = ((content_area.size.height as i32 - margin * 2) / line_height) as usize;
+    
+    if content.is_empty() {
+        Text::new(
+            "Loading...",
+            Point::new(content_area.top_left.x + margin, content_area.top_left.y + margin + 20),
+            text_style,
+        )
+        .draw(canvas)
+        .ok();
+        return;
+    }
+    
+    // Simple word-wrap and pagination
+    let mut y = content_area.top_left.y + margin + 20;
+    let mut line_count = 0;
+    let mut char_count = 0;
+    let start_char = page * chars_per_line * lines_per_page;
+    
+    for line in content.lines() {
+        if char_count + line.len() < start_char {
+            char_count += line.len() + 1;
+            continue;
+        }
+        
+        // Draw this line (possibly truncated)
+        let display_line = if line.len() > chars_per_line {
+            &line[..chars_per_line]
+        } else {
+            line
+        };
+        
+        Text::new(
+            display_line,
+            Point::new(content_area.top_left.x + margin, y),
+            text_style,
+        )
+        .draw(canvas)
+        .ok();
+        
+        y += line_height;
+        line_count += 1;
+        
+        if line_count >= lines_per_page {
+            break;
+        }
+    }
+    
+    // Draw page indicator at bottom
+    let mut page_str: heapless::String<16> = heapless::String::new();
+    let _ = core::fmt::write(&mut page_str, format_args!("Page {}", page + 1));
+    
+    let page_y = content_area.top_left.y + content_area.size.height as i32 - 5;
+    let page_x = content_area.top_left.x + (content_area.size.width as i32 / 2) - 30;
+    Text::new(page_str.as_str(), Point::new(page_x, page_y), text_style)
+        .draw(canvas)
+        .ok();
+}
