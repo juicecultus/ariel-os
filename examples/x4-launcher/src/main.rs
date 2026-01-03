@@ -919,12 +919,14 @@ async fn main(peripherals: pins::Peripherals) {
     info!("Home screen rendered");
 
     let mut last_status_update = ariel_os::time::Instant::now();
+    let _ = last_status_update;
 
     loop {
         let mut dirty = false;
         
         let now = ariel_os::time::Instant::now();
         let update_status = now.duration_since(last_status_update) >= ariel_os::time::Duration::from_secs(2);
+        let _ = update_status;
 
         let new_bat = input.read_battery_percentage();
         if new_bat != state.battery_pct {
