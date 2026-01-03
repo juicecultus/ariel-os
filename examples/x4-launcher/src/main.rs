@@ -188,30 +188,59 @@ enum ButtonEvent {
     Power,
 }
 
-struct InputManager<'d, PIN1, PIN2> {
+struct InputManager<'d, PIN1, PIN2, BAT> {
     adc1: Adc<'d, ADC1>,
     pin1: AdcPin<PIN1, ADC1, AdcCalCurve<ADC1>>,
     pin2: AdcPin<PIN2, ADC1, AdcCalCurve<ADC1>>,
+    bat_pin: AdcPin<BAT, ADC1, AdcCalCurve<ADC1>>,
     power_pin: EspInput<'d>,
     last_state: u8,
 }
 
-impl<'d, PIN1, PIN2> InputManager<'d, PIN1, PIN2>
+impl<'d, PIN1, PIN2, BAT> InputManager<'d, PIN1, PIN2, BAT>
 where
     PIN1: esp_hal::analog::adc::AdcChannel + esp_hal::gpio::AnalogPin,
     PIN2: esp_hal::analog::adc::AdcChannel + esp_hal::gpio::AnalogPin,
+    BAT: esp_hal::analog::adc::AdcChannel + esp_hal::gpio::AnalogPin,
 {
-    fn new(adc1: ADC1, pin1: PIN1, pin2: PIN2, power_pin: EspInput<'d>) -> Self {
+    fn new(adc1: ADC1, pin1: PIN1, pin2: PIN2, bat_pin: BAT, power_pin: EspInput<'d>) -> Self {
         let mut config = AdcConfig::new();
         let adc_pin1 = config.enable_pin_with_cal::<_, AdcCalCurve<ADC1>>(pin1, Attenuation::_11dB);
         let adc_pin2 = config.enable_pin_with_cal::<_, AdcCalCurve<ADC1>>(pin2, Attenuation::_11dB);
+        let adc_bat = config.enable_pin_with_cal::<_, AdcCalCurve<ADC1>>(bat_pin, Attenuation::_11dB);
         let adc1 = Adc::new(adc1, config);
         Self {
             adc1,
             pin1: adc_pin1,
             pin2: adc_pin2,
+            bat_pin: adc_bat,
             power_pin,
             last_state: 0,
+        }
+    }
+
+    fn read_battery_percentage(&mut self) -> u8 {
+        if let Ok(mv) = nb::block!(self.adc1.read_oneshot(&mut self.bat_pin)) {
+            // Voltage divider is 2.0x
+            let vbat_mv = (mv as u32) * 2;
+            let volts = (vbat_mv as f64) / 1000.0;
+
+            // Polynomial derived from LiPo samples (from BatteryMonitor.cpp)
+            // y = -144.9390 * volts^3 + 1655.8629 * volts^2 - 6158.8520 * volts + 7501.3202
+            let mut y = -144.9390 * volts * volts * volts
+                + 1655.8629 * volts * volts
+                - 6158.8520 * volts
+                + 7501.3202;
+
+            if y < 0.0 {
+                y = 0.0;
+            }
+            if y > 100.0 {
+                y = 100.0;
+            }
+            y as u8
+        } else {
+            0
         }
     }
 
@@ -433,6 +462,7 @@ struct AppState {
     settings_reader_selected: usize,
     settings: UiSettings,
     sd_present: bool,
+    battery_pct: u8,
     books: Vec<String<64>, 48>,
 }
 
@@ -532,7 +562,7 @@ async fn render_state<D>(
         Screen::Home => {
             let status = ui::UiStatus {
                 title: "Home",
-                battery_pct: None,
+                battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
                 wifi_on: false,
                 bt_on: false,
@@ -544,7 +574,7 @@ async fn render_state<D>(
         Screen::Apps => {
             let status = ui::UiStatus {
                 title: "Apps",
-                battery_pct: None,
+                battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
                 wifi_on: false,
                 bt_on: false,
@@ -556,7 +586,7 @@ async fn render_state<D>(
         Screen::Library => {
             let status = ui::UiStatus {
                 title: "Library",
-                battery_pct: None,
+                battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
                 wifi_on: false,
                 bt_on: false,
@@ -590,7 +620,7 @@ async fn render_state<D>(
         Screen::Tools => {
             let status = ui::UiStatus {
                 title: "Tools",
-                battery_pct: None,
+                battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
                 wifi_on: false,
                 bt_on: false,
@@ -602,7 +632,7 @@ async fn render_state<D>(
         Screen::Settings => {
             let status = ui::UiStatus {
                 title: "Settings",
-                battery_pct: None,
+                battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
                 wifi_on: false,
                 bt_on: false,
@@ -622,7 +652,7 @@ async fn render_state<D>(
         Screen::SettingsReader => {
             let status = ui::UiStatus {
                 title: "Reader",
-                battery_pct: None,
+                battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
                 wifi_on: false,
                 bt_on: false,
@@ -727,6 +757,7 @@ async fn main(peripherals: pins::Peripherals) {
         peripherals.adc1,
         peripherals.adc_buttons_1,
         peripherals.adc_buttons_2,
+        peripherals.battery_adc,
         power_in,
     );
 
@@ -746,8 +777,11 @@ async fn main(peripherals: pins::Peripherals) {
             books_view_mode: ui::ViewMode::List,
         },
         sd_present: false,
+        battery_pct: 100,
         books: Vec::new(),
     };
+
+    state.battery_pct = input.read_battery_percentage();
 
     info!("Rendering home screen...");
     render_state(&mut display, &state, ssd1677::RefreshMode::Full).await;
@@ -755,6 +789,13 @@ async fn main(peripherals: pins::Peripherals) {
 
     loop {
         let mut dirty = false;
+        
+        let new_bat = input.read_battery_percentage();
+        if new_bat != state.battery_pct {
+            state.battery_pct = new_bat;
+            dirty = true;
+        }
+
         let events = input.poll();
 
         for ev in events.iter().copied() {

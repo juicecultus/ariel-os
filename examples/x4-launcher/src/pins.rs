@@ -23,5 +23,6 @@ ariel_os::hal::define_peripherals!(Peripherals {
     adc1: ADC1,
     adc_buttons_1: GPIO1,
     adc_buttons_2: GPIO2,
+    battery_adc: GPIO0,
     power_button: GPIO3,
 });

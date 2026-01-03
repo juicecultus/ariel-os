@@ -14,6 +14,8 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
+use heapless::String;
+
 use crate::ssd1677;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -264,8 +266,17 @@ where
 
     let mut x = canvas.bounding_box().bottom_right().unwrap().x - 16;
 
+    if let Some(pct) = status.battery_pct {
+        let mut pct_str: String<8> = String::new();
+        let _ = core::fmt::write(&mut pct_str, format_args!("{}%", pct));
+        let pct_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
+        Text::new(pct_str.as_str(), Point::new(x - 64, 28), pct_style)
+            .draw(canvas)
+            .ok();
+    }
+
     draw_battery_icon(canvas, Point::new(x, 18), status.battery_pct);
-    x -= 36;
+    x -= 74;
 
     draw_toggle_icon(canvas, Point::new(x - 44, 18), "SD", status.sd_present);
     x -= 54;
