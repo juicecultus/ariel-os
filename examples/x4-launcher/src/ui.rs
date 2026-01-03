@@ -44,6 +44,7 @@ pub struct UiNavHints<'a> {
 }
 
 pub struct UiLayout {
+    #[allow(dead_code)]
     pub full: Rectangle,
     pub status: Rectangle,
     pub content: Rectangle,
@@ -156,6 +157,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub fn clear<D>(canvas: &mut UiCanvas<'_, D>)
 where
     D: embedded_hal_async::spi::SpiDevice<u8>,

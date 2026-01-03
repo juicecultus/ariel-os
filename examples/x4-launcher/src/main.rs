@@ -29,6 +29,7 @@ use esp_hal::gpio::Input as EspInput;
 use esp_hal::peripherals::ADC1;
 
 #[cfg(context = "xteink-x4")]
+#[allow(unsafe_code)]
 fn init_gpio12_output_mux() {
     unsafe {
         // IO_MUX_GPIO12_REG (0x60009034)
@@ -44,6 +45,7 @@ fn init_gpio12_output_mux() {
 /// SD spec requires >=74 clocks at <=400kHz before first command.
 /// This must be called BEFORE the SPI bus is created.
 #[cfg(context = "xteink-x4")]
+#[allow(unsafe_code)]
 fn sd_slow_dummy_clocks() {
     // First ensure SD CS (GPIO12) is high
     init_gpio12_output_mux();
@@ -99,6 +101,7 @@ impl DigitalErrorType for RawGpio12 {
 
 #[cfg(context = "xteink-x4")]
 impl OutputPin for RawGpio12 {
+    #[allow(unsafe_code)]
     fn set_low(&mut self) -> Result<(), Self::Error> {
         unsafe {
             // GPIO_OUT_W1TC_REG
@@ -107,6 +110,7 @@ impl OutputPin for RawGpio12 {
         Ok(())
     }
 
+    #[allow(unsafe_code)]
     fn set_high(&mut self) -> Result<(), Self::Error> {
         unsafe {
             // GPIO_OUT_W1TS_REG
@@ -163,6 +167,7 @@ impl HomeItem {
         [HomeItem::Apps, HomeItem::Tools, HomeItem::Settings]
     }
 
+    #[allow(dead_code)]
     fn label(self) -> &'static str {
         match self {
             HomeItem::Apps => "Apps",
@@ -271,6 +276,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 struct SdTimeSource;
 
 impl TimeSource for SdTimeSource {
@@ -279,8 +285,10 @@ impl TimeSource for SdTimeSource {
     }
 }
 
+#[allow(dead_code)]
 type SdDir<'a, D> = embedded_sdmmc::Directory<'a, D, SdTimeSource, 4, 4, 1>;
 
+#[allow(dead_code)]
 fn ensure_dir<'a, D>(root: &SdDir<'a, D>, name: &str)
 where
     D: embedded_sdmmc::BlockDevice,
@@ -294,6 +302,7 @@ where
     let _ = root.make_dir_in_dir(name);
 }
 
+#[allow(dead_code)]
 fn ensure_nested_dir<'a, D>(root: &SdDir<'a, D>, parent: &str, child: &str)
 where
     D: embedded_sdmmc::BlockDevice,
@@ -304,6 +313,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn scan_books_from_sd<D>(
     vm: &mut VolumeManager<D, SdTimeSource, 4, 4, 1>,
     out: &mut Vec<String<64>, 48>,
@@ -646,7 +656,8 @@ async fn main(peripherals: pins::Peripherals) {
     // Then use Ariel OS SPI for display (which also works)
     // SD card will be re-initialized on-demand when accessing Library
     info!("Testing SD card with esp-hal SPI...");
-    let sd_detected = unsafe {
+    #[allow(unsafe_code)]
+    let _sd_detected = unsafe {
         let spi2 = esp_hal::peripherals::SPI2::steal();
         let sck = esp_hal::gpio::GpioPin::<8>::steal();
         let miso = esp_hal::gpio::GpioPin::<7>::steal();

@@ -125,6 +125,7 @@ where
         self.buffer.fill(val);
     }
 
+    #[allow(dead_code)]
     pub fn draw_center_text(&mut self, text: &str, y: i32) {
         let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
         let x = (DISPLAY_WIDTH as i32 / 2) - ((text.len() as i32 * 10) / 2);
@@ -291,6 +292,7 @@ pub fn default_spi_config() -> ariel_os::hal::spi::main::Config {
     spi_config
 }
 
+#[allow(dead_code)]
 pub fn sd_spi_config() -> ariel_os::hal::spi::main::Config {
     let mut spi_config = ariel_os::hal::spi::main::Config::default();
     spi_config.frequency = const { highest_freq_in(Kilohertz::kHz(125)..=Kilohertz::kHz(500)) };
