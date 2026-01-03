@@ -8,7 +8,7 @@ apps:
           - "16384"
         isr_stacksize_required:
           - "32768"
-        esp_wifi_heapsize_required: $(110*1024)
+        esp_wifi_heapsize_required: $(160*1024)
     selects:
       - network-config-ipv4-dhcp
       - wifi-esp
