@@ -463,6 +463,7 @@ struct AppState {
     settings: UiSettings,
     sd_present: bool,
     battery_pct: u8,
+    wifi_connected: bool,
     books: Vec<String<64>, 48>,
 }
 
@@ -564,7 +565,7 @@ async fn render_state<D>(
                 title: "Home",
                 battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
-                wifi_on: false,
+                wifi_on: state.wifi_connected,
                 bt_on: false,
             };
             ui::draw_chrome(&mut canvas, &l, status, nav);
@@ -576,7 +577,7 @@ async fn render_state<D>(
                 title: "Apps",
                 battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
-                wifi_on: false,
+                wifi_on: state.wifi_connected,
                 bt_on: false,
             };
             ui::draw_chrome(&mut canvas, &l, status, nav);
@@ -588,7 +589,7 @@ async fn render_state<D>(
                 title: "Library",
                 battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
-                wifi_on: false,
+                wifi_on: state.wifi_connected,
                 bt_on: false,
             };
             ui::draw_chrome(&mut canvas, &l, status, nav);
@@ -622,7 +623,7 @@ async fn render_state<D>(
                 title: "Tools",
                 battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
-                wifi_on: false,
+                wifi_on: state.wifi_connected,
                 bt_on: false,
             };
             ui::draw_chrome(&mut canvas, &l, status, nav);
@@ -634,7 +635,7 @@ async fn render_state<D>(
                 title: "Settings",
                 battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
-                wifi_on: false,
+                wifi_on: state.wifi_connected,
                 bt_on: false,
             };
             ui::draw_chrome(&mut canvas, &l, status, nav);
@@ -654,7 +655,7 @@ async fn render_state<D>(
                 title: "Reader",
                 battery_pct: Some(state.battery_pct),
                 sd_present: state.sd_present,
-                wifi_on: false,
+                wifi_on: state.wifi_connected,
                 bt_on: false,
             };
             ui::draw_chrome(&mut canvas, &l, status, nav);
@@ -778,6 +779,7 @@ async fn main(peripherals: pins::Peripherals) {
         },
         sd_present: false,
         battery_pct: 100,
+        wifi_connected: false,
         books: Vec::new(),
     };
 
@@ -794,6 +796,16 @@ async fn main(peripherals: pins::Peripherals) {
         if new_bat != state.battery_pct {
             state.battery_pct = new_bat;
             dirty = true;
+        }
+
+        // Check Wi-Fi status if enabled
+        #[cfg(feature = "wifi-esp")]
+        {
+            let connected = esp_wifi::wifi::wifi_state() == esp_wifi::wifi::WifiState::StaConnected;
+            if connected != state.wifi_connected {
+                state.wifi_connected = connected;
+                dirty = true;
+            }
         }
 
         let events = input.poll();

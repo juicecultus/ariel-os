@@ -2,3 +2,6 @@ apps:
   - name: x4-launcher
     context:
       - xteink-x4
+    selects:
+      - network-config-ipv4-dhcp
+      - wifi-esp
