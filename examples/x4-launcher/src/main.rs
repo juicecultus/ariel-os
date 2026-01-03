@@ -406,6 +406,124 @@ where
     true
 }
 
+/// Scan books from SD card using direct esp-hal SPI (bypasses Ariel OS SPI)
+/// This temporarily takes over the SPI bus, scans, then releases it.
+fn scan_books_direct(out: &mut Vec<String<64>, 48>) -> bool {
+    fn ends_with_ignore_ascii_case(s: &str, suffix: &str) -> bool {
+        let s = s.as_bytes();
+        let suf = suffix.as_bytes();
+        if suf.len() > s.len() {
+            return false;
+        }
+        let start = s.len() - suf.len();
+        s[start..]
+            .iter()
+            .zip(suf.iter())
+            .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+    }
+
+    out.clear();
+    info!("Scanning SD /books (direct esp-hal SPI)...");
+
+    unsafe {
+        let spi2 = esp_hal::peripherals::SPI2::steal();
+        let sck = esp_hal::gpio::GpioPin::<8>::steal();
+        let miso = esp_hal::gpio::GpioPin::<7>::steal();
+        let mosi = esp_hal::gpio::GpioPin::<10>::steal();
+        
+        let spi_bus = Spi::new(
+            spi2,
+            SpiConfig::default()
+                .with_frequency(20_000_000u32.Hz())
+                .with_mode(SpiMode::_0),
+        )
+        .unwrap()
+        .with_sck(sck)
+        .with_miso(miso)
+        .with_mosi(mosi);
+        
+        let spi_bus_ref = RefCell::new(spi_bus);
+        let delay = EspDelay::new();
+        
+        let sd_cs = RawGpio12::new();
+        let sd_spi = RefCellDevice::new(&spi_bus_ref, sd_cs, delay.clone()).expect("SD SPI failed");
+        
+        let sd_card = SdCard::new(sd_spi, delay.clone());
+        
+        // Check if SD card is present
+        if sd_card.num_bytes().is_err() {
+            info!("SD card not detected");
+            return false;
+        }
+        
+        let mut vm: VolumeManager<_, SdTimeSource, 4, 4, 1> = VolumeManager::new(sd_card, SdTimeSource);
+        
+        let volume = match vm.open_volume(VolumeIdx(0)) {
+            Ok(v) => v,
+            Err(_) => {
+                info!("SD open_volume(0) failed");
+                return false;
+            }
+        };
+
+        let root = match volume.open_root_dir() {
+            Ok(r) => r,
+            Err(_) => {
+                info!("SD open_root_dir failed");
+                return false;
+            }
+        };
+
+        let books_dir = match root.open_dir("books") {
+            Ok(d) => d,
+            Err(_) => {
+                info!("SD: /books not found");
+                return true; // SD works, just no books dir
+            }
+        };
+
+        let mut lfn_storage = [0u8; 192];
+        let mut lfn_buf = LfnBuffer::new(&mut lfn_storage);
+        let _ = books_dir.iterate_dir_lfn(&mut lfn_buf, |entry, lfn| {
+            if let Some(name) = lfn {
+                if !ends_with_ignore_ascii_case(name, ".epub") {
+                    return;
+                }
+                let mut s: String<64> = String::new();
+                for ch in name.chars() {
+                    if s.push(ch).is_err() {
+                        break;
+                    }
+                }
+                let _ = out.push(s);
+                return;
+            }
+
+            let ext = core::str::from_utf8(entry.name.extension()).unwrap_or("");
+            if !(ext.eq_ignore_ascii_case("EPU")
+                || ext.eq_ignore_ascii_case("EPB")
+                || ext.eq_ignore_ascii_case("EP"))
+            {
+                return;
+            }
+
+            let base = core::str::from_utf8(entry.name.base_name()).unwrap_or("");
+            if base.is_empty() || base.starts_with('_') {
+                return;
+            }
+
+            let mut s: String<64> = String::new();
+            let _ = s.push_str(base);
+            let _ = s.push_str(".");
+            let _ = s.push_str(ext);
+            let _ = out.push(s);
+        });
+
+        info!("Found {} book(s)", out.len());
+        true
+    }
+}
+
 #[derive(Clone, Copy)]
 struct UiSettings {
     rotation: ui::Rotation,
@@ -787,11 +905,9 @@ async fn main(peripherals: pins::Peripherals) {
                     }
 
                     if ev == ButtonEvent::Confirm {
-                        // Enter Library: mount + list books once.
-                        // TODO: Re-enable once async SD + FAT adapter is complete
-                        // let ok = scan_books_from_sd(&mut volume_manager, &mut state.books);
-                        // state.sd_present = ok;
-                        state.sd_present = false; // SD not yet working with async
+                        // Enter Library: scan books using direct esp-hal SPI
+                        let ok = scan_books_direct(&mut state.books);
+                        state.sd_present = ok;
                         state.library_cursor = 0;
                         state.screen = Screen::Library;
                         dirty = true;
