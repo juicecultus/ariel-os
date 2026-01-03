@@ -5,10 +5,10 @@ apps:
     env:
       global:
         executor_stacksize_required:
-          - "8192"
+          - "10240"
         isr_stacksize_required:
           - "32768"
-        esp_wifi_heapsize_required: $(170*1024)
+        esp_wifi_heapsize_required: $(160*1024)
     selects:
       - network-config-ipv4-dhcp
       - wifi-esp
